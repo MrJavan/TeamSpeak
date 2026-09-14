@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>آپلود فایل — بکس پارسی</title>
+<title>آپلود فایل</title>
 <link rel="icon" type="image/png" href="img/favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -202,7 +202,7 @@ footer .brand{color:#00f2fe;font-weight:600}
           <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
         </div>
         <div class="file-drop-text"><strong>کلیک کنید</strong> یا فایل را بکشید و رها کنید</div>
-        <div class="file-drop-hint">حداکثر ۵۰۰ مگابایت</div>
+        <div class="file-drop-hint">حداکثر ۲۰ مگابایت</div>
       </div>
       <div class="file-selected" id="fileSelected">
         <div class="file-selected-icon">
@@ -276,7 +276,7 @@ footer .brand{color:#00f2fe;font-weight:600}
   <p>© تمامی حقوق متعلق به <span class="brand">BaxParsi</span> است &nbsp;|&nbsp; طراحی شده توسط Khashi</p>
 </footer>
 <script>
-const API_BASE = 'https://upload.mrjavan.workers.dev';
+const API_BASE = 'https://upload.baxparsi.ir';
 
 function toggleMenu() {
   document.getElementById('navLinks').classList.toggle('open');
@@ -465,9 +465,9 @@ fileInput.addEventListener('change', () => {
 function handleFileSelect(file) {
   if (!file || !file.name) return;
 
-  const MAX_SIZE = 500 * 1024 * 1024;
+  const MAX_SIZE = 20 * 1024 * 1024;
   if (file.size > MAX_SIZE) {
-    showToast('حجم فایل بیش از ۵۰۰ مگابایت است.', true);
+    showToast('حجم فایل بیش از ۲۰ مگابایت است.', true);
     return;
   }
   selectedFile = file;
