@@ -104,9 +104,8 @@
 
       <video
         id="video"
-        autoplay
-        muted
         playsinline
+        preload="auto"
       >
         <source
           src="https://coderhub.s3.ir-thr-at1.arvanstorage.ir/621b9bbd91f4f19ec8ad3fc88247421272733062-480p.mp4"
@@ -168,6 +167,7 @@
     const muteButton =
       document.getElementById("muteButton");
 
+
     /*
      * WebSocket protocol.
      */
@@ -175,6 +175,7 @@
       location.protocol === "https:"
         ? "wss:"
         : "ws:";
+
 
     /*
      * Get Host token from URL.
@@ -184,6 +185,7 @@
 
     const hostToken =
       pageUrl.searchParams.get("token");
+
 
     /*
      * Build WebSocket URL.
@@ -196,63 +198,82 @@
         `?token=${encodeURIComponent(hostToken)}`;
     }
 
+
     let socket = null;
+
 
     /*
      * Current user's role.
      */
     let isHost = false;
 
-    /*
-     * Prevent local events from being
-     * sent while applying server state.
-     */
-    let applyingRemoteState = false;
 
     /*
-     * Prevent synchronized seek events
-     * from being sent back to the server.
-     */
-    let ignoreNextSeek = false;
-
-    /*
-     * Prevent local events before
-     * receiving the initial server state.
-     *
-     * This is especially important after
-     * refreshing the page.
-     */
-    let initialStateReceived = false;
-
-    /*
-     * Store the latest server state.
+     * Server state.
      */
     let lastServerState = null;
 
-    /*
-     * Track whether the video has finished
-     * its initial synchronization.
-     */
-    let videoSynchronized = false;
 
     /*
-     * Check whether the video is ready.
+     * Server role has been received.
+     */
+    let roleReceived = false;
+
+
+    /*
+     * Server state has been received.
+     */
+    let stateReceived = false;
+
+
+    /*
+     * Video has completed its first
+     * synchronization with the server.
+     */
+    let synchronizedWithServer = false;
+
+
+    /*
+     * Prevent local events while the
+     * application is synchronizing.
+     */
+    let applyingRemoteState = false;
+
+
+    /*
+     * Ignore seek events caused by
+     * setting currentTime ourselves.
+     */
+    let ignoreNextSeek = false;
+
+
+    /*
+     * Used to prevent multiple sync
+     * operations from running at once.
+     */
+    let syncInProgress = false;
+
+
+    /*
+     * Check whether video is ready.
      */
     function videoIsReady() {
 
       return (
-        video.readyState >= 3
+        video.readyState >= 2
       );
     }
 
+
     /*
-     * Update mute button icon.
+     * Update mute icon.
      */
     function updateMuteButton() {
 
       if (video.muted) {
 
-        muteButton.textContent = "🔇";
+        muteButton.textContent =
+          "🔇";
 
         muteButton.setAttribute(
           "aria-label",
@@ -261,7 +282,8 @@
 
       } else {
 
-        muteButton.textContent = "🔊";
+        muteButton.textContent =
+          "🔊";
 
         muteButton.setAttribute(
           "aria-label",
@@ -270,22 +292,21 @@
       }
     }
 
+
     /*
-     * Update controls based on role.
+     * Update UI based on role.
      */
     function updateControls() {
 
       if (isHost) {
 
         /*
-         * Host gets native video controls.
+         * Host gets normal video controls.
          */
         video.controls = true;
 
-        /*
-         * Hide custom mute button for Host.
-         */
-        muteButton.style.display = "none";
+        muteButton.style.display =
+          "none";
 
         roleElement.textContent =
           "Role: Host";
@@ -297,10 +318,8 @@
          */
         video.controls = false;
 
-        /*
-         * Viewer only gets mute/unmute.
-         */
-        muteButton.style.display = "flex";
+        muteButton.style.display =
+          "flex";
 
         roleElement.textContent =
           "Role: Viewer";
@@ -309,26 +328,52 @@
       updateMuteButton();
     }
 
+
     /*
-     * Apply the latest server state.
+     * Try to synchronize the video.
      *
      * IMPORTANT:
-     * This function never sends a control
-     * command back to the server.
+     *
+     * This function does NOT send anything
+     * to the server.
+     *
+     * It only applies the server state
+     * locally.
      */
-    async function applyServerState() {
+    async function synchronizeVideo() {
 
-      if (!lastServerState) {
+      /*
+       * We need both state and role.
+       */
+      if (
+        !stateReceived ||
+        !roleReceived ||
+        !lastServerState
+      ) {
         return;
       }
 
+
       /*
-       * Do not synchronize until the video
-       * has enough data.
+       * Prevent multiple simultaneous
+       * synchronization operations.
+       */
+      if (syncInProgress) {
+        return;
+      }
+
+
+      /*
+       * Wait until video has enough data.
        */
       if (!videoIsReady()) {
         return;
       }
+
+
+      syncInProgress = true;
+      applyingRemoteState = true;
+
 
       const playing =
         lastServerState.playing;
@@ -336,22 +381,21 @@
       const position =
         lastServerState.position;
 
-      applyingRemoteState = true;
 
       try {
 
         /*
-         * Synchronize position.
+         * Set the correct position first.
          */
         if (
           Math.abs(
             video.currentTime - position
-          ) > 0.5
+          ) > 0.3
         ) {
 
           /*
-           * Ignore the seek event caused by
-           * changing currentTime ourselves.
+           * This seek is generated by us,
+           * not by the Host.
            */
           ignoreNextSeek = true;
 
@@ -368,20 +412,16 @@
           }
         }
 
+
         /*
-         * Viewers must remain muted during
-         * the first synchronization so that
-         * browser autoplay restrictions do
-         * not stop playback.
+         * Viewers start muted.
          *
-         * After the first sync, do NOT force
-         * mute again. This means if the Viewer
-         * manually unmutes, a later server
-         * update will not mute them again.
+         * This is only done during the
+         * initial synchronization.
          */
         if (
           !isHost &&
-          !videoSynchronized
+          !synchronizedWithServer
         ) {
 
           video.muted = true;
@@ -389,8 +429,9 @@
           updateMuteButton();
         }
 
+
         /*
-         * Synchronize playback state.
+         * Apply playback state.
          */
         if (playing) {
 
@@ -401,8 +442,9 @@
           } catch (error) {
 
             console.log(
-              "Playback will retry when video is ready."
+              "Browser blocked autoplay."
             );
+
           }
 
         } else {
@@ -410,58 +452,52 @@
           video.pause();
         }
 
-        /*
-         * The video is now synchronized.
-         */
-        videoSynchronized = true;
 
-        initialStateReceived = true;
+        /*
+         * Synchronization completed.
+         */
+        synchronizedWithServer = true;
 
       } finally {
 
         /*
-         * Wait until all browser-generated
-         * events caused by synchronization
-         * have finished.
+         * Keep event protection enabled
+         * for one browser task after sync.
+         *
+         * This catches play/pause/seek events
+         * generated by the synchronization itself.
          */
         setTimeout(() => {
 
           applyingRemoteState = false;
+          syncInProgress = false;
 
-        }, 0);
+        }, 100);
       }
     }
 
-    /*
-     * When video becomes ready,
-     * apply the latest server state.
-     */
-    video.addEventListener(
-      "canplay",
-      () => {
-
-        if (!lastServerState) {
-          return;
-        }
-
-        applyServerState();
-      }
-    );
 
     /*
-     * Also retry after metadata is loaded.
+     * Try synchronization when video
+     * becomes ready.
      */
     video.addEventListener(
       "loadedmetadata",
       () => {
 
-        if (!lastServerState) {
-          return;
-        }
-
-        applyServerState();
+        synchronizeVideo();
       }
     );
+
+
+    video.addEventListener(
+      "canplay",
+      () => {
+
+        synchronizeVideo();
+      }
+    );
+
 
     /*
      * Connect to Watch Party server.
@@ -470,6 +506,7 @@
 
       socket =
         new WebSocket(wsUrl);
+
 
       socket.addEventListener(
         "open",
@@ -483,6 +520,7 @@
         }
       );
 
+
       socket.addEventListener(
         "close",
         () => {
@@ -493,13 +531,19 @@
           status.className =
             "status disconnected";
 
+
           /*
-           * The next server state after
-           * reconnect must be treated as
-           * a fresh synchronization.
+           * Reset synchronization state.
+           *
+           * IMPORTANT:
+           * Do not send anything to the server.
            */
-          initialStateReceived = false;
-          videoSynchronized = false;
+          stateReceived = false;
+          roleReceived = false;
+          synchronizedWithServer = false;
+          syncInProgress = false;
+          applyingRemoteState = false;
+
 
           setTimeout(
             connect,
@@ -507,6 +551,7 @@
           );
         }
       );
+
 
       socket.addEventListener(
         "error",
@@ -520,6 +565,7 @@
         }
       );
 
+
       socket.addEventListener(
         "message",
         async (event) => {
@@ -529,8 +575,9 @@
             const data =
               JSON.parse(event.data);
 
+
             /*
-             * Role update.
+             * Role message.
              */
             if (
               data.type === "role"
@@ -539,23 +586,21 @@
               isHost =
                 data.isHost === true;
 
+              roleReceived = true;
+
               updateControls();
 
               /*
-               * If state has already arrived,
-               * synchronize again after knowing
-               * the user's role.
+               * State may have arrived before role.
                */
-              if (lastServerState) {
-
-                await applyServerState();
-              }
+              await synchronizeVideo();
 
               return;
             }
 
+
             /*
-             * Viewer count update.
+             * Viewer count.
              */
             if (
               data.type === "viewers"
@@ -574,33 +619,33 @@
               return;
             }
 
+
             /*
-             * Movie state update.
+             * Movie state.
              */
             if (
-              data.type !== "state"
+              data.type === "state"
             ) {
+
+              lastServerState = {
+                playing:
+                  data.playing === true,
+
+                position:
+                  Number(data.position)
+              };
+
+              stateReceived = true;
+
+
+              /*
+               * Apply state only after
+               * role is known too.
+               */
+              await synchronizeVideo();
+
               return;
             }
-
-            /*
-             * Save server state.
-             *
-             * Do not immediately send anything
-             * back to the server.
-             */
-            lastServerState = {
-              playing:
-                data.playing === true,
-
-              position:
-                Number(data.position)
-            };
-
-            /*
-             * Apply server state locally.
-             */
-            await applyServerState();
 
           } catch (error) {
 
@@ -610,35 +655,31 @@
             );
 
             applyingRemoteState = false;
+            syncInProgress = false;
           }
         }
       );
     }
 
+
     /*
      * Host Play.
+     *
+     * No command can be sent before
+     * synchronization is complete.
      */
     video.addEventListener(
       "play",
       () => {
 
-        /*
-         * Ignore browser autoplay and
-         * synchronization events.
-         */
         if (
-          !initialStateReceived ||
-          applyingRemoteState
+          !synchronizedWithServer ||
+          applyingRemoteState ||
+          !isHost
         ) {
           return;
         }
 
-        /*
-         * Viewers never send control commands.
-         */
-        if (!isHost) {
-          return;
-        }
 
         if (
           !socket ||
@@ -646,6 +687,7 @@
         ) {
           return;
         }
+
 
         socket.send(
           JSON.stringify({
@@ -657,6 +699,7 @@
       }
     );
 
+
     /*
      * Host Pause.
      */
@@ -664,23 +707,14 @@
       "pause",
       () => {
 
-        /*
-         * Ignore browser autoplay and
-         * synchronization events.
-         */
         if (
-          !initialStateReceived ||
-          applyingRemoteState
+          !synchronizedWithServer ||
+          applyingRemoteState ||
+          !isHost
         ) {
           return;
         }
 
-        /*
-         * Viewers never send control commands.
-         */
-        if (!isHost) {
-          return;
-        }
 
         if (
           !socket ||
@@ -688,6 +722,7 @@
         ) {
           return;
         }
+
 
         socket.send(
           JSON.stringify({
@@ -699,6 +734,7 @@
       }
     );
 
+
     /*
      * Host Seek.
      *
@@ -709,26 +745,21 @@
       () => {
 
         /*
-         * Ignore events before the first
-         * server synchronization.
+         * Ignore all seek events before
+         * initial synchronization.
          */
         if (
-          !initialStateReceived ||
-          applyingRemoteState
+          !synchronizedWithServer ||
+          applyingRemoteState ||
+          !isHost
         ) {
           return;
         }
 
-        /*
-         * Viewers cannot seek.
-         */
-        if (!isHost) {
-          return;
-        }
 
         /*
-         * Ignore the seek event generated
-         * by server synchronization.
+         * Ignore seek caused by setting
+         * currentTime during synchronization.
          */
         if (ignoreNextSeek) {
 
@@ -737,12 +768,14 @@
           return;
         }
 
+
         if (
           !socket ||
           socket.readyState !== WebSocket.OPEN
         ) {
           return;
         }
+
 
         socket.send(
           JSON.stringify({
@@ -754,11 +787,11 @@
       }
     );
 
+
     /*
-     * Viewer-only mute/unmute.
+     * Viewer mute/unmute.
      *
-     * This is completely local and does
-     * NOT affect other users.
+     * This is completely local.
      */
     muteButton.addEventListener(
       "click",
@@ -771,15 +804,18 @@
       }
     );
 
+
     /*
-     * Initialize Viewer mode.
+     * Initialize UI.
      */
     updateControls();
+
 
     /*
      * Start WebSocket connection.
      */
     connect();
+
   </script>
 
 </body>
