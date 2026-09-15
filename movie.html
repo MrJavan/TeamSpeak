@@ -156,33 +156,44 @@
     let isHost = false;
 
     /*
-     * Prevent local video events from
-     * being sent while applying server state.
+     * Prevent local events from being
+     * sent while applying server state.
      */
     let applyingRemoteState = false;
 
     /*
-     * Ignore seek events caused by
-     * synchronization.
+     * Prevent synchronized seek events
+     * from being sent back to the server.
      */
     let ignoreNextSeek = false;
 
     /*
-     * Prevent local video events before
-     * receiving the first server state.
+     * Prevent local events before
+     * receiving the initial server state.
      */
     let initialStateReceived = false;
 
     /*
-     * Latest state received from server.
+     * Store the latest server state.
+     *
+     * This is important when the WebSocket
+     * state arrives before the video is ready.
      */
-    let lastServerState = {
-      playing: false,
-      position: 0
-    };
+    let lastServerState = null;
 
     /*
-     * Update video controls based on role.
+     * Check whether the video is ready
+     * enough for playback.
+     */
+    function videoIsReady() {
+
+      return (
+        video.readyState >= 3
+      );
+    }
+
+    /*
+     * Update controls based on role.
      */
     function updateControls() {
 
@@ -203,22 +214,32 @@
     }
 
     /*
-     * Apply server movie state.
+     * Apply the latest server state.
      */
-    async function applyServerState(
-      playing,
-      position
-    ) {
+    async function applyServerState() {
 
-      lastServerState = {
-        playing,
-        position
-      };
+      if (!lastServerState) {
+        return;
+      }
+
+      const playing =
+        lastServerState.playing;
+
+      const position =
+        lastServerState.position;
+
+      /*
+       * If the video is not ready yet,
+       * wait for canplay.
+       */
+      if (!videoIsReady()) {
+        return;
+      }
 
       applyingRemoteState = true;
 
       /*
-       * Synchronize video position.
+       * Synchronize position.
        */
       if (
         Math.abs(
@@ -228,17 +249,22 @@
 
         ignoreNextSeek = true;
 
-        video.currentTime = position;
+        try {
+          video.currentTime = position;
+        } catch (error) {
+          console.log(
+            "Unable to set video position."
+          );
+        }
       }
 
       /*
-       * Synchronize playback state.
+       * Synchronize playback.
        */
       if (playing) {
 
         /*
-         * Viewers use muted autoplay because
-         * browsers can block autoplay with sound.
+         * Viewers use muted autoplay.
          */
         if (!isHost) {
           video.muted = true;
@@ -251,7 +277,7 @@
         } catch (error) {
 
           console.log(
-            "Autoplay was blocked by the browser."
+            "Playback will retry when video is ready."
           );
 
         }
@@ -265,6 +291,40 @@
 
       applyingRemoteState = false;
     }
+
+    /*
+     * When the video becomes ready,
+     * apply the latest server state again.
+     *
+     * This fixes the problem where a Viewer
+     * joins while the movie is already playing.
+     */
+    video.addEventListener(
+      "canplay",
+      () => {
+
+        if (!lastServerState) {
+          return;
+        }
+
+        applyServerState();
+      }
+    );
+
+    /*
+     * Also retry after metadata is loaded.
+     */
+    video.addEventListener(
+      "loadedmetadata",
+      () => {
+
+        if (!lastServerState) {
+          return;
+        }
+
+        applyServerState();
+      }
+    );
 
     /*
      * Connect to Watch Party server.
@@ -327,7 +387,7 @@
               JSON.parse(event.data);
 
             /*
-             * Server role message.
+             * Role update.
              */
             if (
               data.type === "role"
@@ -338,11 +398,20 @@
 
               updateControls();
 
+              /*
+               * Role can arrive before or after
+               * the state, so try synchronization
+               * again after receiving the role.
+               */
+              if (lastServerState) {
+                applyServerState();
+              }
+
               return;
             }
 
             /*
-             * Viewer count message.
+             * Viewer count update.
              */
             if (
               data.type === "viewers"
@@ -362,7 +431,7 @@
             }
 
             /*
-             * Movie state message.
+             * Movie state update.
              */
             if (
               data.type !== "state"
@@ -370,13 +439,28 @@
               return;
             }
 
-            const position =
-              Number(data.position);
+            /*
+             * Save the state first.
+             *
+             * Do not immediately depend on
+             * the video being ready.
+             */
+            lastServerState = {
+              playing:
+                data.playing === true,
 
-            await applyServerState(
-              data.playing === true,
-              position
-            );
+              position:
+                Number(data.position)
+            };
+
+            /*
+             * Try to apply immediately.
+             *
+             * If the video isn't ready,
+             * canplay/loadedmetadata will
+             * apply it later.
+             */
+            await applyServerState();
 
           } catch (error) {
 
@@ -393,8 +477,6 @@
 
     /*
      * Host Play.
-     *
-     * Only Host sends this command.
      */
     video.addEventListener(
       "play",
@@ -404,6 +486,9 @@
           return;
         }
 
+        /*
+         * Viewers never send control commands.
+         */
         if (!isHost) {
           return;
         }
@@ -428,8 +513,6 @@
 
     /*
      * Host Pause.
-     *
-     * Only Host sends this command.
      */
     video.addEventListener(
       "pause",
@@ -439,6 +522,9 @@
           return;
         }
 
+        /*
+         * Viewers never send control commands.
+         */
         if (!isHost) {
           return;
         }
@@ -464,8 +550,7 @@
     /*
      * Host Seek.
      *
-     * Seeking automatically pauses
-     * the movie for everyone.
+     * Seeking pauses the movie for everyone.
      */
     video.addEventListener(
       "seeked",
@@ -475,6 +560,9 @@
           return;
         }
 
+        /*
+         * Viewers cannot seek.
+         */
         if (!isHost) {
           return;
         }
