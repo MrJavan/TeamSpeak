@@ -35,12 +35,22 @@
       display: block;
     }
 
-    .status {
+    .info {
+      display: flex;
+      gap: 10px;
       margin-top: 15px;
+    }
+
+    .status,
+    .viewers {
       padding: 10px 14px;
       background: #222;
       border-radius: 6px;
       font-size: 14px;
+    }
+
+    .viewers {
+      color: #fff;
     }
 
     .connected {
@@ -72,8 +82,22 @@
       >
     </video>
 
-    <div id="status" class="status disconnected">
-      Connecting...
+    <div class="info">
+
+      <div
+        id="status"
+        class="status disconnected"
+      >
+        Connecting...
+      </div>
+
+      <div
+        id="viewers"
+        class="viewers"
+      >
+        👁 0 viewers
+      </div>
+
     </div>
 
   </div>
@@ -81,6 +105,7 @@
   <script>
     const video = document.getElementById("video");
     const status = document.getElementById("status");
+    const viewers = document.getElementById("viewers");
 
     const wsProtocol =
       location.protocol === "https:" ? "wss:" : "ws:";
@@ -127,6 +152,17 @@
         try {
           const data = JSON.parse(event.data);
 
+          // Viewer count update
+          if (data.type === "viewers") {
+            const count = Number(data.count);
+
+            viewers.textContent =
+              `👁 ${count} ${count === 1 ? "viewer" : "viewers"}`;
+
+            return;
+          }
+
+          // Movie state update
           if (data.type !== "state") {
             return;
           }
