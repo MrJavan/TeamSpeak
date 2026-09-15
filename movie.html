@@ -28,11 +28,47 @@
       margin-bottom: 20px;
     }
 
+    .video-container {
+      position: relative;
+      width: 100%;
+      background: #000;
+    }
+
     video {
       width: 100%;
       max-height: 600px;
       background: #000;
       display: block;
+    }
+
+    /*
+     * Viewer mute button.
+     */
+    #muteButton {
+      display: none;
+
+      position: absolute;
+      right: 15px;
+      bottom: 15px;
+
+      width: 46px;
+      height: 46px;
+
+      border: none;
+      border-radius: 50%;
+
+      background: rgba(0, 0, 0, 0.75);
+      color: #fff;
+
+      font-size: 22px;
+
+      cursor: pointer;
+
+      z-index: 10;
+    }
+
+    #muteButton:hover {
+      background: rgba(0, 0, 0, 0.9);
     }
 
     .info {
@@ -67,18 +103,31 @@
 
     <h1>Watch Party</h1>
 
-    <video
-      id="video"
-      controls
-      autoplay
-      muted
-      playsinline
-    >
-      <source
-        src="https://coderhub.s3.ir-thr-at1.arvanstorage.ir/621b9bbd91f4f19ec8ad3fc88247421272733062-480p.mp4"
-        type="video/mp4"
+    <div class="video-container">
+
+      <video
+        id="video"
+        controls
+        autoplay
+        muted
+        playsinline
       >
-    </video>
+        <source
+          src="https://coderhub.s3.ir-thr-at1.arvanstorage.ir/621b9bbd91f4f19ec8ad3fc88247421272733062-480p.mp4"
+          type="video/mp4"
+        >
+      </video>
+
+      <!-- Viewer mute/unmute button -->
+      <button
+        id="muteButton"
+        type="button"
+        aria-label="Unmute"
+      >
+        🔇
+      </button>
+
+    </div>
 
     <div class="info">
 
@@ -120,6 +169,9 @@
     const roleElement =
       document.getElementById("role");
 
+    const muteButton =
+      document.getElementById("muteButton");
+
     /*
      * WebSocket protocol.
      */
@@ -156,14 +208,14 @@
     let isHost = false;
 
     /*
-     * Prevent local events from being
-     * sent while applying server state.
+     * Prevent local video events from
+     * being sent while applying server state.
      */
     let applyingRemoteState = false;
 
     /*
-     * Prevent synchronized seek events
-     * from being sent back to the server.
+     * Ignore seek events caused by
+     * synchronization.
      */
     let ignoreNextSeek = false;
 
@@ -174,44 +226,103 @@
     let initialStateReceived = false;
 
     /*
-     * Store the latest server state.
-     *
-     * This is important when the WebSocket
-     * state arrives before the video is ready.
+     * Latest server state.
      */
     let lastServerState = null;
 
     /*
-     * Check whether the video is ready
-     * enough for playback.
+     * Check if video is ready.
      */
     function videoIsReady() {
 
-      return (
-        video.readyState >= 3
-      );
+      return video.readyState >= 3;
     }
 
     /*
-     * Update controls based on role.
+     * Update role UI.
      */
     function updateControls() {
 
       if (isHost) {
 
+        /*
+         * Host gets normal video controls.
+         */
         video.controls = true;
+
+        /*
+         * Viewer mute button is hidden.
+         */
+        muteButton.style.display =
+          "none";
 
         roleElement.textContent =
           "Role: Host";
 
       } else {
 
+        /*
+         * Viewer does not get
+         * Play/Pause/Seek controls.
+         */
         video.controls = false;
+
+        /*
+         * Viewer gets only mute/unmute.
+         */
+        muteButton.style.display =
+          "block";
 
         roleElement.textContent =
           "Role: Viewer";
+
+        updateMuteButton();
       }
     }
+
+    /*
+     * Update mute button icon.
+     */
+    function updateMuteButton() {
+
+      if (video.muted) {
+
+        muteButton.textContent =
+          "🔇";
+
+        muteButton.setAttribute(
+          "aria-label",
+          "Unmute"
+        );
+
+      } else {
+
+        muteButton.textContent =
+          "🔊";
+
+        muteButton.setAttribute(
+          "aria-label",
+          "Mute"
+        );
+      }
+    }
+
+    /*
+     * Viewer mute/unmute.
+     *
+     * This is completely local and
+     * is not sent to the server.
+     */
+    muteButton.addEventListener(
+      "click",
+      () => {
+
+        video.muted =
+          !video.muted;
+
+        updateMuteButton();
+      }
+    );
 
     /*
      * Apply the latest server state.
@@ -222,19 +333,15 @@
         return;
       }
 
+      if (!videoIsReady()) {
+        return;
+      }
+
       const playing =
         lastServerState.playing;
 
       const position =
         lastServerState.position;
-
-      /*
-       * If the video is not ready yet,
-       * wait for canplay.
-       */
-      if (!videoIsReady()) {
-        return;
-      }
 
       applyingRemoteState = true;
 
@@ -249,13 +356,8 @@
 
         ignoreNextSeek = true;
 
-        try {
-          video.currentTime = position;
-        } catch (error) {
-          console.log(
-            "Unable to set video position."
-          );
-        }
+        video.currentTime =
+          position;
       }
 
       /*
@@ -264,10 +366,19 @@
       if (playing) {
 
         /*
-         * Viewers use muted autoplay.
+         * Viewers need muted autoplay.
          */
         if (!isHost) {
-          video.muted = true;
+
+          /*
+           * Only force mute if the viewer
+           * has not manually enabled sound yet.
+           */
+          if (
+            !initialStateReceived
+          ) {
+            video.muted = true;
+          }
         }
 
         try {
@@ -277,9 +388,8 @@
         } catch (error) {
 
           console.log(
-            "Playback will retry when video is ready."
+            "Autoplay was blocked."
           );
-
         }
 
       } else {
@@ -290,14 +400,12 @@
       initialStateReceived = true;
 
       applyingRemoteState = false;
+
+      updateMuteButton();
     }
 
     /*
-     * When the video becomes ready,
-     * apply the latest server state again.
-     *
-     * This fixes the problem where a Viewer
-     * joins while the movie is already playing.
+     * Video became ready.
      */
     video.addEventListener(
       "canplay",
@@ -312,7 +420,7 @@
     );
 
     /*
-     * Also retry after metadata is loaded.
+     * Metadata loaded.
      */
     video.addEventListener(
       "loadedmetadata",
@@ -387,7 +495,7 @@
               JSON.parse(event.data);
 
             /*
-             * Role update.
+             * Role message.
              */
             if (
               data.type === "role"
@@ -398,11 +506,6 @@
 
               updateControls();
 
-              /*
-               * Role can arrive before or after
-               * the state, so try synchronization
-               * again after receiving the role.
-               */
               if (lastServerState) {
                 applyServerState();
               }
@@ -411,7 +514,7 @@
             }
 
             /*
-             * Viewer count update.
+             * Viewer count.
              */
             if (
               data.type === "viewers"
@@ -431,7 +534,7 @@
             }
 
             /*
-             * Movie state update.
+             * Movie state.
              */
             if (
               data.type !== "state"
@@ -440,10 +543,7 @@
             }
 
             /*
-             * Save the state first.
-             *
-             * Do not immediately depend on
-             * the video being ready.
+             * Save server state.
              */
             lastServerState = {
               playing:
@@ -454,11 +554,7 @@
             };
 
             /*
-             * Try to apply immediately.
-             *
-             * If the video isn't ready,
-             * canplay/loadedmetadata will
-             * apply it later.
+             * Apply immediately if possible.
              */
             await applyServerState();
 
@@ -486,9 +582,6 @@
           return;
         }
 
-        /*
-         * Viewers never send control commands.
-         */
         if (!isHost) {
           return;
         }
@@ -522,9 +615,6 @@
           return;
         }
 
-        /*
-         * Viewers never send control commands.
-         */
         if (!isHost) {
           return;
         }
@@ -549,8 +639,6 @@
 
     /*
      * Host Seek.
-     *
-     * Seeking pauses the movie for everyone.
      */
     video.addEventListener(
       "seeked",
@@ -560,9 +648,6 @@
           return;
         }
 
-        /*
-         * Viewers cannot seek.
-         */
         if (!isHost) {
           return;
         }
@@ -596,15 +681,16 @@
     );
 
     /*
-     * Initialize Viewer mode.
+     * Initialize UI.
      */
     updateControls();
 
+    updateMuteButton();
+
     /*
-     * Start WebSocket connection.
+     * Connect.
      */
     connect();
   </script>
 
 </body>
-</html>
