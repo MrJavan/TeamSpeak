@@ -1,3 +1,4 @@
+```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -59,7 +60,13 @@
 
     <h1>Watch Party</h1>
 
-    <video id="video" controls>
+    <video
+      id="video"
+      controls
+      autoplay
+      muted
+      playsinline
+    >
       <source
         src="https://coderhub.s3.ir-thr-at1.arvanstorage.ir/621b9bbd91f4f19ec8ad3fc88247421272733062-480p.mp4"
         type="video/mp4"
@@ -76,11 +83,19 @@
     const video = document.getElementById("video");
     const status = document.getElementById("status");
 
-    const wsProtocol = location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${wsProtocol}//movie.mrjavan.workers.dev`;
+    const wsProtocol =
+      location.protocol === "https:" ? "wss:" : "ws:";
+
+    const wsUrl =
+      `${wsProtocol}//movie.mrjavan.workers.dev`;
 
     let socket;
+
+    // Prevent remote changes from being sent back to the server
     let applyingRemoteState = false;
+
+    // Prevent the seeked event caused by synchronization
+    // from being treated as a local seek
     let ignoreNextSeek = false;
 
     function connect() {
@@ -92,8 +107,11 @@
       });
 
       socket.addEventListener("close", () => {
-        status.textContent = "Disconnected - reconnecting...";
-        status.className = "status disconnected";
+        status.textContent =
+          "Disconnected - reconnecting...";
+
+        status.className =
+          "status disconnected";
 
         setTimeout(connect, 2000);
       });
@@ -104,38 +122,66 @@
       });
 
       socket.addEventListener("message", async (event) => {
-        const data = JSON.parse(event.data);
+        try {
+          const data = JSON.parse(event.data);
 
-        if (data.type !== "state") {
-          return;
-        }
-
-        applyingRemoteState = true;
-
-        const targetPosition = Number(data.position);
-
-        if (
-          Math.abs(video.currentTime - targetPosition) > 0.5
-        ) {
-          ignoreNextSeek = true;
-          video.currentTime = targetPosition;
-        }
-
-        if (data.playing) {
-          try {
-            await video.play();
-          } catch (error) {
-            console.log("Autoplay was blocked by the browser.");
+          if (data.type !== "state") {
+            return;
           }
-        } else {
-          video.pause();
-        }
 
-        applyingRemoteState = false;
+          applyingRemoteState = true;
+
+          const targetPosition =
+            Number(data.position);
+
+          // Synchronize playback position
+          if (
+            Math.abs(
+              video.currentTime - targetPosition
+            ) > 0.5
+          ) {
+            ignoreNextSeek = true;
+
+            video.currentTime =
+              targetPosition;
+          }
+
+          // Synchronize playback state
+          if (data.playing) {
+
+            // Muted autoplay is allowed by modern browsers
+            video.muted = true;
+
+            try {
+              await video.play();
+            } catch (error) {
+              console.log(
+                "Autoplay was blocked by the browser."
+              );
+            }
+
+          } else {
+
+            video.pause();
+
+          }
+
+          applyingRemoteState = false;
+
+        } catch (error) {
+          console.error(
+            "Invalid server message:",
+            error
+          );
+
+          applyingRemoteState = false;
+        }
       });
     }
 
+    // Local Play
     video.addEventListener("play", () => {
+
       if (
         applyingRemoteState ||
         !socket ||
@@ -144,13 +190,17 @@
         return;
       }
 
-      socket.send(JSON.stringify({
-        type: "play",
-        position: video.currentTime
-      }));
+      socket.send(
+        JSON.stringify({
+          type: "play",
+          position: video.currentTime
+        })
+      );
     });
 
+    // Local Pause
     video.addEventListener("pause", () => {
+
       if (
         applyingRemoteState ||
         !socket ||
@@ -159,14 +209,23 @@
         return;
       }
 
-      socket.send(JSON.stringify({
-        type: "pause",
-        position: video.currentTime
-      }));
+      socket.send(
+        JSON.stringify({
+          type: "pause",
+          position: video.currentTime
+        })
+      );
     });
 
+    // Local Seek
     video.addEventListener("seeked", () => {
-      if (applyingRemoteState || ignoreNextSeek) {
+
+      // Ignore seeks caused by synchronization
+      if (applyingRemoteState) {
+        return;
+      }
+
+      if (ignoreNextSeek) {
         ignoreNextSeek = false;
         return;
       }
@@ -178,14 +237,18 @@
         return;
       }
 
-      socket.send(JSON.stringify({
-        type: "seek",
-        position: video.currentTime
-      }));
+      socket.send(
+        JSON.stringify({
+          type: "seek",
+          position: video.currentTime
+        })
+      );
     });
 
+    // Connect to Watch Party server
     connect();
   </script>
 
 </body>
 </html>
+```
