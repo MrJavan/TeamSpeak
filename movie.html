@@ -227,7 +227,7 @@
         id="videoUrlInput"
         class="video-url-input"
         type="url"
-        placeholder="MP4 URL Here..."
+        placeholder="MP4 URL HERE..."
       >
 
       <button
@@ -428,6 +428,38 @@
      * detect when the host changes it.
      */
     let currentVideoUrl = null;
+
+
+    /*
+     * When lastServerState was received, so we can
+     * estimate the "live" expected position later
+     * (e.g. after the host's tab was backgrounded).
+     */
+    let lastServerStateReceivedAt = null;
+
+
+    /*
+     * Estimate where playback should be right now,
+     * based on the last known server state and how
+     * much time has passed since we received it.
+     */
+    function getEstimatedServerPosition() {
+
+      if (!lastServerState) {
+        return 0;
+      }
+
+      if (!lastServerState.playing) {
+        return lastServerState.position;
+      }
+
+      const elapsed =
+        (Date.now() - lastServerStateReceivedAt) / 1000;
+
+      return (
+        lastServerState.position + elapsed
+      );
+    }
 
 
     /*
@@ -1081,6 +1113,9 @@
 
               };
 
+              lastServerStateReceivedAt =
+                Date.now();
+
 
               stateReceived = true;
 
@@ -1165,6 +1200,19 @@
           applyingRemoteState ||
           !isHost
         ) {
+          return;
+        }
+
+
+        /*
+         * Browsers often pause background-tab video
+         * automatically to save power. That is not a
+         * deliberate pause by the host, so don't tell
+         * the server (and therefore the viewers) about
+         * it — visibilitychange below will resume it
+         * locally once the tab is visible again.
+         */
+        if (document.visibilityState !== "visible") {
           return;
         }
 
@@ -1331,6 +1379,80 @@
 
           socket.close();
         }
+      }
+    );
+
+
+    /*
+     * When the host returns to this tab, the browser may
+     * have auto-paused the video while it was backgrounded
+     * (that pause was never sent to the server — see the
+     * "pause" listener above). Silently catch the host's
+     * own video back up and resume it, without notifying
+     * anyone; the server/viewers were never affected.
+     */
+    document.addEventListener(
+      "visibilitychange",
+      () => {
+
+        if (!isHost) {
+          return;
+        }
+
+        if (document.visibilityState !== "visible") {
+          return;
+        }
+
+        if (
+          !lastServerState ||
+          !lastServerState.playing
+        ) {
+          return;
+        }
+
+        if (!video.paused) {
+          return;
+        }
+
+        if (!videoIsReady()) {
+          return;
+        }
+
+        applyingRemoteState = true;
+
+        ignoreNextSeek = true;
+
+        const estimatedPosition =
+          getEstimatedServerPosition();
+
+        try {
+
+          video.currentTime =
+            estimatedPosition;
+
+        } catch (error) {
+
+          console.log(
+            "Unable to resync position after returning to tab."
+          );
+        }
+
+        video
+          .play()
+          .catch(() => {
+
+            console.log(
+              "Resume after tab-switch failed."
+            );
+          })
+          .finally(() => {
+
+            setTimeout(() => {
+
+              applyingRemoteState = false;
+
+            }, 150);
+          });
       }
     );
 
