@@ -337,9 +337,12 @@
 
 
       /*
-       * Viewers must be muted for autoplay.
+       * Only force-mute on the very first playback
+       * attempt (before initial sync), so autoplay
+       * is not blocked by the browser. After that,
+       * respect the viewer's own mute/unmute choice.
        */
-      if (!isHost) {
+      if (!isHost && !synchronizedWithServer) {
 
         video.muted = true;
 
@@ -358,6 +361,32 @@
         console.log(
           "Autoplay attempt failed."
         );
+
+        /*
+         * If unmuted playback was blocked by the
+         * browser's autoplay policy, fall back to
+         * muted playback so the video still plays.
+         * The viewer can unmute manually again.
+         */
+        if (!isHost && !video.muted) {
+
+          video.muted = true;
+
+          updateMuteButton();
+
+          try {
+
+            await video.play();
+
+            return true;
+
+          } catch (fallbackError) {
+
+            console.log(
+              "Muted fallback also failed."
+            );
+          }
+        }
 
         return false;
       }
@@ -482,25 +511,10 @@
 
 
         /*
-         * Viewer autoplay.
-         */
-        if (!isHost) {
-
-          /*
-           * Always start the initial
-           * synchronization muted.
-           */
-          if (!synchronizedWithServer) {
-
-            video.muted = true;
-
-            updateMuteButton();
-          }
-        }
-
-
-        /*
          * Apply playback state.
+         *
+         * Muting on first playback (and the muted
+         * fallback) is handled inside startPlayback().
          */
         if (playing) {
 
