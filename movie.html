@@ -81,6 +81,7 @@
 
     let socket;
     let applyingRemoteState = false;
+    let ignoreNextSeek = false;
 
     function connect() {
       socket = new WebSocket(wsUrl);
@@ -116,6 +117,7 @@
         if (
           Math.abs(video.currentTime - targetPosition) > 0.5
         ) {
+          ignoreNextSeek = true;
           video.currentTime = targetPosition;
         }
 
@@ -134,7 +136,11 @@
     }
 
     video.addEventListener("play", () => {
-      if (applyingRemoteState || !socket || socket.readyState !== WebSocket.OPEN) {
+      if (
+        applyingRemoteState ||
+        !socket ||
+        socket.readyState !== WebSocket.OPEN
+      ) {
         return;
       }
 
@@ -145,7 +151,11 @@
     });
 
     video.addEventListener("pause", () => {
-      if (applyingRemoteState || !socket || socket.readyState !== WebSocket.OPEN) {
+      if (
+        applyingRemoteState ||
+        !socket ||
+        socket.readyState !== WebSocket.OPEN
+      ) {
         return;
       }
 
@@ -156,7 +166,15 @@
     });
 
     video.addEventListener("seeked", () => {
-      if (applyingRemoteState || !socket || socket.readyState !== WebSocket.OPEN) {
+      if (applyingRemoteState || ignoreNextSeek) {
+        ignoreNextSeek = false;
+        return;
+      }
+
+      if (
+        !socket ||
+        socket.readyState !== WebSocket.OPEN
+      ) {
         return;
       }
 
