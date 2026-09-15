@@ -227,7 +227,7 @@
         id="videoUrlInput"
         class="video-url-input"
         type="url"
-        placeholder="Movie URL..."
+        placeholder="MP4 URL Here..."
       >
 
       <button
@@ -331,6 +331,50 @@
 
 
     let socket = null;
+
+
+    /*
+     * Heartbeat: periodically ping the server so it
+     * knows this connection is still alive, even if
+     * the network drops without a clean close.
+     */
+    let heartbeatIntervalId = null;
+
+    const HEARTBEAT_INTERVAL_MS = 15000;
+
+
+    function startHeartbeat() {
+
+      stopHeartbeat();
+
+      heartbeatIntervalId =
+        setInterval(() => {
+
+          if (
+            socket &&
+            socket.readyState === WebSocket.OPEN
+          ) {
+
+            socket.send(
+              JSON.stringify({
+                type: "ping"
+              })
+            );
+          }
+
+        }, HEARTBEAT_INTERVAL_MS);
+    }
+
+
+    function stopHeartbeat() {
+
+      if (heartbeatIntervalId) {
+
+        clearInterval(heartbeatIntervalId);
+
+        heartbeatIntervalId = null;
+      }
+    }
 
 
     /*
@@ -902,6 +946,8 @@
 
           status.className =
             "status connected";
+
+          startHeartbeat();
         }
       );
 
@@ -915,6 +961,9 @@
 
           status.className =
             "status disconnected";
+
+
+          stopHeartbeat();
 
 
           /*
@@ -1265,6 +1314,25 @@
      * Start WebSocket connection.
      */
     connect();
+
+
+    /*
+     * Close the connection cleanly on refresh/navigation
+     * so the server can immediately update the viewer
+     * count instead of waiting on the heartbeat timeout.
+     */
+    window.addEventListener(
+      "beforeunload",
+      () => {
+
+        stopHeartbeat();
+
+        if (socket) {
+
+          socket.close();
+        }
+      }
+    );
 
   </script>
 
