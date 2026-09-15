@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>Watch Party</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: #111;
+      color: #fff;
+      font-family: Arial, sans-serif;
+    }
+
+    .container {
+      max-width: 1000px;
+      margin: 40px auto;
+      padding: 20px;
+    }
+
+    h1 {
+      margin-bottom: 20px;
+    }
+
+    video {
+      width: 100%;
+      max-height: 600px;
+      background: #000;
+      display: block;
+    }
+
+    .status {
+      margin-top: 15px;
+      padding: 10px 14px;
+      background: #222;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+
+    .connected {
+      color: #4caf50;
+    }
+
+    .disconnected {
+      color: #f44336;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="container">
+
+    <h1>Watch Party</h1>
+
+    <video id="video" controls>
+      <source
+        src="https://coderhub.s3.ir-thr-at1.arvanstorage.ir/621b9bbd91f4f19ec8ad3fc88247421272733062-480p.mp4"
+        type="video/mp4"
+      >
+    </video>
+
+    <div id="status" class="status disconnected">
+      Connecting...
+    </div>
+
+  </div>
+
+  <script>
+    const video = document.getElementById("video");
+    const status = document.getElementById("status");
+
+    const wsProtocol = location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${wsProtocol}//movie.mrjavan.workers.dev`;
+
+    let socket;
+    let applyingRemoteState = false;
+
+    function connect() {
+      socket = new WebSocket(wsUrl);
+
+      socket.addEventListener("open", () => {
+        status.textContent = "Connected";
+        status.className = "status connected";
+      });
+
+      socket.addEventListener("close", () => {
+        status.textContent = "Disconnected - reconnecting...";
+        status.className = "status disconnected";
+
+        setTimeout(connect, 2000);
+      });
+
+      socket.addEventListener("error", () => {
+        status.textContent = "Connection error";
+        status.className = "status disconnected";
+      });
+
+      socket.addEventListener("message", async (event) => {
+        const data = JSON.parse(event.data);
+
+        if (data.type !== "state") {
+          return;
+        }
+
+        applyingRemoteState = true;
+
+        const targetPosition = Number(data.position);
+
+        if (
+          Math.abs(video.currentTime - targetPosition) > 0.5
+        ) {
+          video.currentTime = targetPosition;
+        }
+
+        if (data.playing) {
+          try {
+            await video.play();
+          } catch (error) {
+            console.log("Autoplay was blocked by the browser.");
+          }
+        } else {
+          video.pause();
+        }
+
+        applyingRemoteState = false;
+      });
+    }
+
+    video.addEventListener("play", () => {
+      if (applyingRemoteState || !socket || socket.readyState !== WebSocket.OPEN) {
+        return;
+      }
+
+      socket.send(JSON.stringify({
+        type: "play",
+        position: video.currentTime
+      }));
+    });
+
+    video.addEventListener("pause", () => {
+      if (applyingRemoteState || !socket || socket.readyState !== WebSocket.OPEN) {
+        return;
+      }
+
+      socket.send(JSON.stringify({
+        type: "pause",
+        position: video.currentTime
+      }));
+    });
+
+    video.addEventListener("seeked", () => {
+      if (applyingRemoteState || !socket || socket.readyState !== WebSocket.OPEN) {
+        return;
+      }
+
+      socket.send(JSON.stringify({
+        type: "seek",
+        position: video.currentTime
+      }));
+    });
+
+    connect();
+  </script>
+
+</body>
+</html>
