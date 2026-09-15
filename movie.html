@@ -39,10 +39,12 @@
       display: flex;
       gap: 10px;
       margin-top: 15px;
+      flex-wrap: wrap;
     }
 
     .status,
-    .viewers {
+    .viewers,
+    .role {
       padding: 10px 14px;
       background: #222;
       border-radius: 6px;
@@ -50,6 +52,10 @@
     }
 
     .viewers {
+      color: #fff;
+    }
+
+    .role {
       color: #fff;
     }
 
@@ -98,6 +104,13 @@
         👁 0 viewers
       </div>
 
+      <div
+        id="role"
+        class="role"
+      >
+        Role: Viewer
+      </div>
+
     </div>
 
   </div>
@@ -106,25 +119,89 @@
     const video = document.getElementById("video");
     const status = document.getElementById("status");
     const viewers = document.getElementById("viewers");
+    const roleElement = document.getElementById("role");
 
     const wsProtocol =
       location.protocol === "https:" ? "wss:" : "ws:";
 
-    const wsUrl =
+    /*
+     * Host token is passed through the URL.
+     *
+     * Example:
+     * ?token=YOUR_HOST_TOKEN
+     */
+    const pageUrl = new URL(window.location.href);
+    const hostToken = pageUrl.searchParams.get("token");
+
+    let wsUrl =
       `${wsProtocol}//movie.mrjavan.workers.dev`;
+
+    if (hostToken) {
+      wsUrl += `?token=${encodeURIComponent(hostToken)}`;
+    }
 
     let socket;
 
-    // Prevent remote changes from being sent back to the server
+    // True when this browser is the Host
+    let isHost = false;
+
+    // Prevent remote changes from being sent back
     let applyingRemoteState = false;
 
-    // Prevent the seeked event caused by synchronization
-    // from being treated as a local seek
+    // Prevent synchronization seeks from being sent back
     let ignoreNextSeek = false;
 
-    // Prevent local video events before the first server state
-    // has been received
+    // Prevent local events before initial synchronization
     let initialStateReceived = false;
+
+    /*
+     * Viewer controls are disabled until the server
+     * confirms the user's role.
+     */
+    function updateControls() {
+      if (isHost) {
+        video.controls = true;
+        roleElement.textContent = "Role: Host";
+      } else {
+        video.controls = false;
+        roleElement.textContent = "Role: Viewer";
+      }
+    }
+
+    /*
+     * Force Viewer back to the server state.
+     *
+     * This protects against attempts to control the video
+     * through browser JavaScript or other local methods.
+     */
+    function enforceViewerState(playing, position) {
+      if (isHost) {
+        return;
+      }
+
+      applyingRemoteState = true;
+
+      if (
+        Math.abs(
+          video.currentTime - position
+        ) > 0.2
+      ) {
+        ignoreNextSeek = true;
+        video.currentTime = position;
+      }
+
+      if (playing) {
+        video.play().catch(() => {
+          console.log(
+            "Viewer autoplay was blocked by the browser."
+          );
+        });
+      } else {
+        video.pause();
+      }
+
+      applyingRemoteState = false;
+    }
 
     function connect() {
       socket = new WebSocket(wsUrl);
@@ -145,38 +222,63 @@
       });
 
       socket.addEventListener("error", () => {
-        status.textContent = "Connection error";
-        status.className = "status disconnected";
+        status.textContent =
+          "Connection error";
+
+        status.className =
+          "status disconnected";
       });
 
       socket.addEventListener("message", async (event) => {
         try {
           const data = JSON.parse(event.data);
 
-          // Viewer count update
+          /*
+           * Role update
+           */
+          if (data.type === "role") {
+            isHost = data.isHost === true;
+
+            updateControls();
+
+            return;
+          }
+
+          /*
+           * Viewer count update
+           */
           if (data.type === "viewers") {
             const count = Number(data.count);
 
             viewers.textContent =
-              `👁 ${count} ${count === 1 ? "viewer" : "viewers"}`;
+              `👁 ${count} ${
+                count === 1
+                  ? "viewer"
+                  : "viewers"
+              }`;
 
             return;
           }
 
-          // Movie state update
+          /*
+           * Movie state update
+           */
           if (data.type !== "state") {
             return;
           }
 
-          applyingRemoteState = true;
-
           const targetPosition =
             Number(data.position);
 
-          // Synchronize playback position
+          applyingRemoteState = true;
+
+          /*
+           * Synchronize position
+           */
           if (
             Math.abs(
-              video.currentTime - targetPosition
+              video.currentTime -
+              targetPosition
             ) > 0.5
           ) {
             ignoreNextSeek = true;
@@ -185,11 +287,14 @@
               targetPosition;
           }
 
+          /*
+           * Synchronize playback
+           */
           if (data.playing) {
 
             /*
-             * The initial state is always muted so that
-             * browser autoplay restrictions do not block it.
+             * Only use muted autoplay for the
+             * initial synchronization.
              */
             if (!initialStateReceived) {
               video.muted = true;
@@ -209,11 +314,6 @@
 
           }
 
-          /*
-           * The client is now synchronized with the server.
-           * From this point onward, local Play/Pause/Seek
-           * events are allowed to control the room.
-           */
           initialStateReceived = true;
 
           applyingRemoteState = false;
@@ -230,15 +330,18 @@
       });
     }
 
-    // Local Play
+    /*
+     * Local Play
+     *
+     * Only Host is allowed to send this command.
+     */
     video.addEventListener("play", () => {
 
-      /*
-       * IMPORTANT:
-       * Ignore the autoplay event that happens after refresh
-       * before the server sends the real movie state.
-       */
       if (!initialStateReceived) {
+        return;
+      }
+
+      if (!isHost) {
         return;
       }
 
@@ -258,13 +361,18 @@
       );
     });
 
-    // Local Pause
+    /*
+     * Local Pause
+     *
+     * Only Host is allowed to send this command.
+     */
     video.addEventListener("pause", () => {
 
-      /*
-       * Ignore pause events before initial synchronization.
-       */
       if (!initialStateReceived) {
+        return;
+      }
+
+      if (!isHost) {
         return;
       }
 
@@ -284,13 +392,18 @@
       );
     });
 
-    // Local Seek
+    /*
+     * Local Seek
+     *
+     * Only Host is allowed to send this command.
+     */
     video.addEventListener("seeked", () => {
 
-      /*
-       * Ignore seeks before initial synchronization.
-       */
       if (!initialStateReceived) {
+        return;
+      }
+
+      if (!isHost) {
         return;
       }
 
@@ -318,7 +431,48 @@
       );
     });
 
-    // Connect to Watch Party server
+    /*
+     * Viewer protection:
+     *
+     * If a Viewer somehow changes the video locally,
+     * restore the last server state when possible.
+     */
+    video.addEventListener("play", () => {
+
+      if (
+        !isHost &&
+        initialStateReceived &&
+        !applyingRemoteState
+      ) {
+        video.pause();
+      }
+    });
+
+    video.addEventListener("pause", () => {
+
+      if (
+        !isHost &&
+        initialStateReceived &&
+        !applyingRemoteState
+      ) {
+        // Server will send the correct state again.
+      }
+    });
+
+    video.addEventListener("seeking", () => {
+
+      if (
+        !isHost &&
+        initialStateReceived &&
+        !applyingRemoteState
+      ) {
+        // Prevent Viewer from changing the timeline.
+        video.currentTime = video.currentTime;
+      }
+    });
+
+    // Start connection
+    updateControls();
     connect();
   </script>
 
