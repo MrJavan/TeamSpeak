@@ -122,7 +122,8 @@
     // from being treated as a local seek
     let ignoreNextSeek = false;
 
-    // True only until the first server state is received
+    // Prevent local video events before the first server state
+    // has been received
     let initialStateReceived = false;
 
     function connect() {
@@ -187,9 +188,8 @@
           if (data.playing) {
 
             /*
-             * Only the initial state uses muted autoplay.
-             * After the user interacts with the video,
-             * we never force mute again.
+             * The initial state is always muted so that
+             * browser autoplay restrictions do not block it.
              */
             if (!initialStateReceived) {
               video.muted = true;
@@ -209,7 +209,11 @@
 
           }
 
-          // The first server state has now been processed
+          /*
+           * The client is now synchronized with the server.
+           * From this point onward, local Play/Pause/Seek
+           * events are allowed to control the room.
+           */
           initialStateReceived = true;
 
           applyingRemoteState = false;
@@ -228,6 +232,15 @@
 
     // Local Play
     video.addEventListener("play", () => {
+
+      /*
+       * IMPORTANT:
+       * Ignore the autoplay event that happens after refresh
+       * before the server sends the real movie state.
+       */
+      if (!initialStateReceived) {
+        return;
+      }
 
       if (
         applyingRemoteState ||
@@ -248,6 +261,13 @@
     // Local Pause
     video.addEventListener("pause", () => {
 
+      /*
+       * Ignore pause events before initial synchronization.
+       */
+      if (!initialStateReceived) {
+        return;
+      }
+
       if (
         applyingRemoteState ||
         !socket ||
@@ -266,6 +286,13 @@
 
     // Local Seek
     video.addEventListener("seeked", () => {
+
+      /*
+       * Ignore seeks before initial synchronization.
+       */
+      if (!initialStateReceived) {
+        return;
+      }
 
       if (applyingRemoteState) {
         return;
@@ -297,4 +324,3 @@
 
 </body>
 </html>
-
