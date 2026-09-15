@@ -35,9 +35,27 @@
 
     video {
       width: 100%;
+      min-height: 300px;
       max-height: 600px;
       background: #000;
       display: block;
+    }
+
+    .no-video-message {
+      position: absolute;
+      inset: 0;
+
+      display: flex;
+      align-items: center;
+      justify-content: center;
+
+      padding: 20px;
+      text-align: center;
+
+      color: #aaa;
+      font-size: 15px;
+
+      pointer-events: none;
     }
 
     .mute-button {
@@ -108,6 +126,49 @@
       font-size: 14px;
     }
 
+    .host-controls {
+      display: none;
+      gap: 10px;
+      margin-top: 15px;
+    }
+
+    .video-url-input {
+      flex: 1;
+
+      padding: 10px 14px;
+
+      border: 1px solid #333;
+      border-radius: 6px;
+
+      background: #1a1a1a;
+      color: #fff;
+
+      font-size: 14px;
+      direction: ltr;
+      text-align: left;
+    }
+
+    .video-url-input::placeholder {
+      color: #888;
+    }
+
+    .set-video-button {
+      padding: 10px 18px;
+
+      border: none;
+      border-radius: 6px;
+
+      background: #4caf50;
+      color: #fff;
+
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    .set-video-button:hover {
+      background: #439a46;
+    }
+
     .connected {
       color: #4caf50;
     }
@@ -131,12 +192,14 @@
         playsinline
         preload="auto"
         muted
+      ></video>
+
+      <div
+        id="noVideoMessage"
+        class="no-video-message"
       >
-        <source
-          src="https://coderhub.s3.ir-thr-at1.arvanstorage.ir/621b9bbd91f4f19ec8ad3fc88247421272733062-480p.mp4"
-          type="video/mp4"
-        >
-      </video>
+        هنوز فیلمی توسط میزبان تنظیم نشده است
+      </div>
 
       <button
         id="muteButton"
@@ -154,6 +217,26 @@
         00:00 / 00:00
       </div>
 
+    </div>
+
+    <div
+      id="hostControls"
+      class="host-controls"
+    >
+      <input
+        id="videoUrlInput"
+        class="video-url-input"
+        type="url"
+        placeholder="لینک مستقیم فیلم (mp4) را وارد کنید"
+      >
+
+      <button
+        id="setVideoButton"
+        class="set-video-button"
+        type="button"
+      >
+        تنظیم فیلم
+      </button>
     </div>
 
     <div class="info">
@@ -201,6 +284,18 @@
 
     const timeDisplay =
       document.getElementById("timeDisplay");
+
+    const noVideoMessage =
+      document.getElementById("noVideoMessage");
+
+    const hostControls =
+      document.getElementById("hostControls");
+
+    const videoUrlInput =
+      document.getElementById("videoUrlInput");
+
+    const setVideoButton =
+      document.getElementById("setVideoButton");
 
 
     /*
@@ -281,6 +376,14 @@
      * Prevent multiple sync operations.
      */
     let syncInProgress = false;
+
+
+    /*
+     * The video URL currently loaded, as
+     * received from the server. Used to
+     * detect when the host changes it.
+     */
+    let currentVideoUrl = null;
 
 
     /*
@@ -394,6 +497,9 @@
         timeDisplay.style.display =
           "none";
 
+        hostControls.style.display =
+          "flex";
+
         roleElement.textContent =
           "Role: Host";
 
@@ -406,6 +512,9 @@
 
         timeDisplay.style.display =
           "flex";
+
+        hostControls.style.display =
+          "none";
 
         roleElement.textContent =
           "Role: Viewer";
@@ -538,6 +647,58 @@
 
         }, 1500);
       }
+    }
+
+
+    /*
+     * Apply a (possibly new) video URL coming
+     * from the server. Only reloads the <video>
+     * element when the URL actually changed.
+     */
+    function applyVideoUrl(url) {
+
+      if (url === currentVideoUrl) {
+        return false;
+      }
+
+      currentVideoUrl = url;
+
+      /*
+       * A video change means any previous
+       * synchronization no longer applies.
+       */
+      synchronizedWithServer = false;
+
+      if (url) {
+
+        video.pause();
+
+        video.src = url;
+
+        video.load();
+
+        noVideoMessage.style.display =
+          "none";
+
+      } else {
+
+        video.pause();
+
+        video.removeAttribute("src");
+
+        video.load();
+
+        noVideoMessage.style.display =
+          "flex";
+      }
+
+      if (isHost) {
+
+        videoUrlInput.value =
+          url || "";
+      }
+
+      return true;
     }
 
 
@@ -852,6 +1013,15 @@
               data.type === "state"
             ) {
 
+              /*
+               * Handle a video URL change first
+               * (this may reset synchronizedWithServer).
+               */
+              applyVideoUrl(
+                data.videoUrl || null
+              );
+
+
               lastServerState = {
 
                 playing:
@@ -1031,6 +1201,56 @@
           !video.muted;
 
         updateMuteButton();
+      }
+    );
+
+
+    /*
+     * Host sets a new video URL.
+     */
+    function submitVideoUrl() {
+
+      if (!isHost) {
+        return;
+      }
+
+      const url =
+        videoUrlInput.value.trim();
+
+      if (!url) {
+        return;
+      }
+
+      if (
+        !socket ||
+        socket.readyState !== WebSocket.OPEN
+      ) {
+        return;
+      }
+
+      socket.send(
+        JSON.stringify({
+          type: "setVideo",
+          url
+        })
+      );
+    }
+
+
+    setVideoButton.addEventListener(
+      "click",
+      submitVideoUrl
+    );
+
+
+    videoUrlInput.addEventListener(
+      "keydown",
+      (event) => {
+
+        if (event.key === "Enter") {
+
+          submitVideoUrl();
+        }
       }
     );
 
