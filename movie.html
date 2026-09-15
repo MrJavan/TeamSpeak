@@ -1,4 +1,3 @@
-```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -98,6 +97,9 @@
     // from being treated as a local seek
     let ignoreNextSeek = false;
 
+    // True only until the first server state is received
+    let initialStateReceived = false;
+
     function connect() {
       socket = new WebSocket(wsUrl);
 
@@ -146,11 +148,16 @@
               targetPosition;
           }
 
-          // Synchronize playback state
           if (data.playing) {
 
-            // Muted autoplay is allowed by modern browsers
-            video.muted = true;
+            /*
+             * Only the initial state uses muted autoplay.
+             * After the user interacts with the video,
+             * we never force mute again.
+             */
+            if (!initialStateReceived) {
+              video.muted = true;
+            }
 
             try {
               await video.play();
@@ -166,9 +173,13 @@
 
           }
 
+          // The first server state has now been processed
+          initialStateReceived = true;
+
           applyingRemoteState = false;
 
         } catch (error) {
+
           console.error(
             "Invalid server message:",
             error
@@ -220,7 +231,6 @@
     // Local Seek
     video.addEventListener("seeked", () => {
 
-      // Ignore seeks caused by synchronization
       if (applyingRemoteState) {
         return;
       }
@@ -251,4 +261,4 @@
 
 </body>
 </html>
-```
+
