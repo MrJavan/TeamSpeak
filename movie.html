@@ -120,6 +120,9 @@
     const roleElement =
       document.getElementById("role");
 
+    /*
+     * WebSocket protocol.
+     */
     const wsProtocol =
       location.protocol === "https:"
         ? "wss:"
@@ -135,7 +138,7 @@
       pageUrl.searchParams.get("token");
 
     /*
-     * WebSocket URL.
+     * Build WebSocket URL.
      */
     let wsUrl =
       `${wsProtocol}//movie.mrjavan.workers.dev`;
@@ -148,31 +151,30 @@
     let socket = null;
 
     /*
-     * True when this browser is the Host.
+     * Current user's role.
      */
     let isHost = false;
 
     /*
-     * Prevent local events from being
-     * sent while applying server state.
+     * Prevent local video events from
+     * being sent while applying server state.
      */
     let applyingRemoteState = false;
 
     /*
-     * Prevent synchronization seeks
-     * from being sent back to the server.
+     * Ignore seek events caused by
+     * synchronization.
      */
     let ignoreNextSeek = false;
 
     /*
-     * Prevent local events before the
-     * first server state is received.
+     * Prevent local video events before
+     * receiving the first server state.
      */
     let initialStateReceived = false;
 
     /*
-     * Store the latest state received
-     * from the server.
+     * Latest state received from server.
      */
     let lastServerState = {
       playing: false,
@@ -180,7 +182,7 @@
     };
 
     /*
-     * Update controls based on role.
+     * Update video controls based on role.
      */
     function updateControls() {
 
@@ -201,7 +203,7 @@
     }
 
     /*
-     * Apply the current server state.
+     * Apply server movie state.
      */
     async function applyServerState(
       playing,
@@ -216,7 +218,7 @@
       applyingRemoteState = true;
 
       /*
-       * Synchronize position.
+       * Synchronize video position.
        */
       if (
         Math.abs(
@@ -230,14 +232,13 @@
       }
 
       /*
-       * Synchronize playback.
+       * Synchronize playback state.
        */
       if (playing) {
 
         /*
-         * Viewers need muted autoplay
-         * because browsers may block autoplay
-         * with sound.
+         * Viewers use muted autoplay because
+         * browsers can block autoplay with sound.
          */
         if (!isHost) {
           video.muted = true;
@@ -266,7 +267,7 @@
     }
 
     /*
-     * Connect to the Watch Party server.
+     * Connect to Watch Party server.
      */
     function connect() {
 
@@ -295,9 +296,6 @@
           status.className =
             "status disconnected";
 
-          /*
-           * Reset synchronization state.
-           */
           initialStateReceived = false;
 
           setTimeout(
@@ -329,7 +327,7 @@
               JSON.parse(event.data);
 
             /*
-             * Role update.
+             * Server role message.
              */
             if (
               data.type === "role"
@@ -344,7 +342,7 @@
             }
 
             /*
-             * Viewer count update.
+             * Viewer count message.
              */
             if (
               data.type === "viewers"
@@ -364,7 +362,7 @@
             }
 
             /*
-             * Movie state update.
+             * Movie state message.
              */
             if (
               data.type !== "state"
@@ -395,6 +393,8 @@
 
     /*
      * Host Play.
+     *
+     * Only Host sends this command.
      */
     video.addEventListener(
       "play",
@@ -404,17 +404,7 @@
           return;
         }
 
-        /*
-         * Viewers cannot control playback.
-         */
         if (!isHost) {
-
-          if (
-            !applyingRemoteState
-          ) {
-            video.pause();
-          }
-
           return;
         }
 
@@ -438,6 +428,8 @@
 
     /*
      * Host Pause.
+     *
+     * Only Host sends this command.
      */
     video.addEventListener(
       "pause",
@@ -447,9 +439,6 @@
           return;
         }
 
-        /*
-         * Viewers cannot control playback.
-         */
         if (!isHost) {
           return;
         }
@@ -475,8 +464,8 @@
     /*
      * Host Seek.
      *
-     * Seeking pauses the movie
-     * for everyone.
+     * Seeking automatically pauses
+     * the movie for everyone.
      */
     video.addEventListener(
       "seeked",
@@ -486,21 +475,7 @@
           return;
         }
 
-        /*
-         * Viewers cannot control seeking.
-         */
         if (!isHost) {
-
-          if (
-            !applyingRemoteState
-          ) {
-
-            ignoreNextSeek = true;
-
-            video.currentTime =
-              lastServerState.position;
-          }
-
           return;
         }
 
@@ -533,62 +508,15 @@
     );
 
     /*
-     * Viewer protection.
-     *
-     * If a Viewer tries to play the video,
-     * immediately pause it again.
-     */
-    video.addEventListener(
-      "play",
-      () => {
-
-        if (
-          !isHost &&
-          initialStateReceived &&
-          !applyingRemoteState
-        ) {
-
-          video.pause();
-        }
-      }
-    );
-
-    /*
-     * Viewer protection.
-     *
-     * If a Viewer tries to seek,
-     * restore the latest server position.
-     */
-    video.addEventListener(
-      "seeking",
-      () => {
-
-        if (
-          !isHost &&
-          initialStateReceived &&
-          !applyingRemoteState
-        ) {
-
-          ignoreNextSeek = true;
-
-          video.currentTime =
-            lastServerState.position;
-        }
-      }
-    );
-
-    /*
-     * Start with Viewer controls disabled.
-     * The server will later determine the role.
+     * Initialize Viewer mode.
      */
     updateControls();
 
     /*
-     * Connect to server.
+     * Start WebSocket connection.
      */
     connect();
   </script>
 
 </body>
 </html>
-
