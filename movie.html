@@ -227,7 +227,7 @@
         id="videoUrlInput"
         class="video-url-input"
         type="url"
-        placeholder="MP4 URL HERE..."
+        placeholder="Mp4 Url Here..."
       >
 
       <button
@@ -420,6 +420,27 @@
      * Prevent multiple sync operations.
      */
     let syncInProgress = false;
+
+
+    /*
+     * If a new state arrives while a sync is already
+     * in progress, remember to run another sync right
+     * after the current one finishes instead of just
+     * dropping the update.
+     */
+    let pendingResync = false;
+
+
+    /*
+     * Whether we've already attempted the very first
+     * playback for this page load. Browsers only need
+     * autoplay to start muted; that permission is tied
+     * to the page, not to any one sync, so this must NOT
+     * reset on reconnects (unlike synchronizedWithServer),
+     * or a viewer who already unmuted would get muted
+     * again after every brief network hiccup.
+     */
+    let hasAttemptedAutoplay = false;
 
 
     /*
@@ -622,15 +643,18 @@
 
       /*
        * Only force-mute on the very first playback
-       * attempt (before initial sync), so autoplay
-       * is not blocked by the browser. After that,
-       * respect the viewer's own mute/unmute choice.
+       * attempt of this page load (before initial sync).
+       * After that, respect the viewer's own mute/unmute
+       * choice — this must survive reconnects, so it does
+       * NOT depend on synchronizedWithServer.
        */
-      if (!isHost && !synchronizedWithServer) {
+      if (!isHost && !hasAttemptedAutoplay) {
 
         video.muted = true;
 
         updateMuteButton();
+
+        hasAttemptedAutoplay = true;
       }
 
 
@@ -796,6 +820,7 @@
 
 
       if (syncInProgress) {
+        pendingResync = true;
         return;
       }
 
@@ -885,6 +910,19 @@
 
           applyingRemoteState = false;
           syncInProgress = false;
+
+
+          /*
+           * A newer state arrived while we were busy —
+           * run it now instead of leaving the client
+           * out of sync until some other event happens.
+           */
+          if (pendingResync) {
+
+            pendingResync = false;
+
+            synchronizeVideo();
+          }
 
         }, 150);
       }
@@ -1055,6 +1093,20 @@
               roleReceived = true;
 
               updateControls();
+
+
+              /*
+               * The "state" message (which carries
+               * videoUrl) is sent before "role", so if
+               * we've just learned we're the host, make
+               * sure the input field reflects whatever
+               * video URL was already received.
+               */
+              if (isHost) {
+
+                videoUrlInput.value =
+                  currentVideoUrl || "";
+              }
 
 
               /*
@@ -1393,7 +1445,7 @@
      */
     document.addEventListener(
       "visibilitychange",
-      () => {
+      async () => {
 
         if (!isHost) {
           return;
@@ -1437,22 +1489,36 @@
           );
         }
 
-        video
-          .play()
-          .catch(() => {
+        try {
 
-            console.log(
-              "Resume after tab-switch failed."
-            );
-          })
-          .finally(() => {
+          await video.play();
 
-            setTimeout(() => {
+        } catch (error) {
 
-              applyingRemoteState = false;
+          console.log(
+            "Resume after tab-switch failed."
+          );
 
-            }, 150);
-          });
+        } finally {
+
+          setTimeout(() => {
+
+            applyingRemoteState = false;
+
+          }, 150);
+        }
+
+
+        /*
+         * If playback still hasn't started
+         * (e.g. the browser needed a moment
+         * more), retry automatically instead
+         * of leaving the host stuck paused.
+         */
+        if (video.paused) {
+
+          retryPlayback();
+        }
       }
     );
 
